@@ -1,0 +1,20 @@
+{
+  "features": [
+    "num_guests",
+    "num_rooms",
+    "amount",
+    "lead_time_days",
+    "stay_duration_days",
+    "past_user_bookings",
+    "past_user_cancellations",
+    "past_user_cancellation_rate",
+    "past_market_bookings",
+    "past_market_cancellations",
+    "past_market_cancellation_rate",
+    "past_user_bookings_7d"
+  ],
+  "threshold": 1.0204870700836182,
+  "input_dim": 12,
+  "threshold_percentile": 95,
+  "project": "BookGuard AI - Travel Booking Anomaly Detection"
+}

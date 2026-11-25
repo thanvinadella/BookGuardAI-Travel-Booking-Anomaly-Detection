@@ -1,0 +1,14 @@
+{
+  "source_travel_rows": 100000,
+  "source_booking_rows": 7993,
+  "supplementary_rows": 7993,
+  "synthetic_label_count": 1012,
+  "chronological_cutoff": "2014-09-30 14:31:26.400000",
+  "training_rows": 6394,
+  "future_test_rows": 1599,
+  "threshold_percentile": 95,
+  "threshold": 1.0204870700836182,
+  "future_flagged_count": 92,
+  "future_flagged_percentage": 5.7535959974984365,
+  "note": "Synthetic labels are artificial rule-based labels, not verified fraud outcomes."
+}
