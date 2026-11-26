@@ -394,8 +394,7 @@ with st.sidebar:
         f"""
         <div style="font-size:0.80rem; color:#8ba0bb; line-height:2.0;">
         <b style="color:#00c8b4">Model</b><br>Autoencoder<br>
-        <b style="color:#00c8b4">Input Features</b><br>{INPUT_DIM}<br>
-        <b style="color:#00c8b4">Detection Threshold</b><br>{THRESHOLD:.4f}
+        <b style="color:#00c8b4">Input Features</b><br>{INPUT_DIM}
         </div>
         """,
         unsafe_allow_html=True,
@@ -819,17 +818,10 @@ elif page == "📋 Anomaly Records":
 
     # ── Filtered KPIs ──
     st.markdown("")
-    k1, k2, k3, k4 = st.columns(4)
-    filt_total   = len(df_filt)
-    filt_flagged = int(df_filt["is_anomaly"].sum())
-    filt_normal  = filt_total - filt_flagged
-    filt_rate    = filt_flagged / filt_total * 100 if filt_total else 0
-    avg_score    = df_filt["anomaly_score"].mean() if filt_total else 0.0
-
-    with k1: kpi("Filtered Records",  f"{filt_total:,}", "matching criteria")
-    with k2: kpi("Flagged",           f"{filt_flagged:,}", f"{filt_rate:.1f}% of filtered", "danger")
-    with k3: kpi("Normal",            f"{filt_normal:,}", "passed screening", "ok")
-    with k4: kpi("Avg Anomaly Score", f"{avg_score:.4f}", f"threshold: {THRESHOLD:.4f}", "warn")
+    avg_score = df_filt["anomaly_score"].mean() if len(df_filt) else 0.0
+    score_col, _ = st.columns([1, 3])
+    with score_col:
+        kpi("Average Anomaly Score", f"{avg_score:.4f}", "for currently filtered records", "warn")
 
     st.markdown("")
 
@@ -888,134 +880,65 @@ elif page == "📈 Analytics & Insights":
     st.markdown("")
 
     df         = load_anomaly_results()
-    df_market  = load_flagged_market()
     df_thresh  = load_threshold_comparison()
 
-    # ── Row 1: Market analysis | Threshold comparison ──
-    col_a, col_b = st.columns([3, 2])
+    # Threshold sensitivity is shown here only (not repeated in Fraud Investigation).
+    st.markdown('<div class="section-header">Threshold Sensitivity</div>', unsafe_allow_html=True)
+    fig_thr = go.Figure()
+    fig_thr.add_trace(go.Scatter(
+        x=df_thresh["Threshold"],
+        y=df_thresh["Future flagged percentage"],
+        mode="lines+markers+text",
+        line=dict(color=CYAN, width=2),
+        marker=dict(size=10, color=WARN, line=dict(color=PLOT_BG, width=2)),
+        text=[f"p{int(p)}<br>{v:.2f}%" for p, v in zip(
+            df_thresh["Training percentile"], df_thresh["Future flagged percentage"]
+        )],
+        textposition="top center",
+        textfont=dict(color=FONT_CLR, size=10),
+    ))
+    fig_thr.add_vline(
+        x=THRESHOLD, line_dash="dash", line_color=WARN, line_width=1.5,
+        annotation_text=f"Active threshold ({THRESHOLD:.4f})",
+        annotation_font_color=WARN,
+    )
+    fig_thr.update_layout(
+        **base_layout(height=340),
+        xaxis_title="Threshold Value",
+        yaxis_title="% of Future Bookings Flagged",
+    )
+    st.plotly_chart(fig_thr, use_container_width=True, config={"displayModeBar": False})
 
-    with col_a:
-        # Renamed from "Top Hotel Markets" to "Top Travel Markets"
-        # (uses the actual hotel_market column in the dataset – column unchanged)
-        st.markdown(
-            '<div class="section-header">Top Travel Markets by Flagged Bookings</div>',
-            unsafe_allow_html=True,
-        )
-        top_markets = df_market.sort_values("flagged_bookings", ascending=False).head(15)
-        fig_mkt = px.bar(
-            top_markets,
-            x="hotel_market",
-            y="flagged_bookings",
-            color="mean_score",
-            color_continuous_scale=[[0, TEAL], [0.5, WARN], [1, DANGER]],
-            labels={
-                "hotel_market":    "Travel Market ID",
-                "flagged_bookings": "Flagged Bookings",
-                "mean_score":      "Mean Anomaly Score",
-            },
-            text="flagged_bookings",
-        )
-        fig_mkt.update_traces(textposition="outside", textfont_color=FONT_CLR)
-        fig_mkt.update_layout(
-            **base_layout(
-                height=350,
-                coloraxis_colorbar=dict(title="Mean Anomaly Score", tickfont_color=FONT_CLR),
-            )
-        )
-        fig_mkt.update_xaxes(type="category")
-        st.plotly_chart(fig_mkt, use_container_width=True, config={"displayModeBar": False})
+    # Weekly flagged trend (unique time-based view).
+    st.markdown('<div class="section-header">Weekly Flagged Booking Trend</div>', unsafe_allow_html=True)
+    df_flagged = df[df["is_anomaly"] == 1].copy()
+    df_flagged["week"] = df_flagged["date_time"].dt.to_period("W").dt.start_time
+    weekly_flag = df_flagged.groupby("week").size().reset_index(name="flagged_count")
+    fig_trend = go.Figure()
+    fig_trend.add_trace(go.Scatter(
+        x=weekly_flag["week"],
+        y=weekly_flag["flagged_count"],
+        mode="lines+markers",
+        line=dict(color=DANGER, width=2),
+        fill="tozeroy",
+        fillcolor="rgba(255,79,114,0.12)",
+        marker=dict(size=6, color=DANGER),
+        name="Flagged / week",
+    ))
+    fig_trend.add_hline(
+        y=weekly_flag["flagged_count"].mean(),
+        line_dash="dot",
+        line_color=WARN,
+        annotation_text="Weekly avg",
+        annotation_font_color=WARN,
+    )
+    fig_trend.update_layout(
+        **base_layout(height=320, showlegend=False),
+        xaxis_title="Week",
+        yaxis_title="Flagged Bookings",
+    )
+    st.plotly_chart(fig_trend, use_container_width=True, config={"displayModeBar": False})
 
-    with col_b:
-        st.markdown('<div class="section-header">Threshold Sensitivity</div>', unsafe_allow_html=True)
-        fig_thr = go.Figure()
-        fig_thr.add_trace(go.Scatter(
-            x=df_thresh["Threshold"],
-            y=df_thresh["Future flagged percentage"],
-            mode="lines+markers+text",
-            line=dict(color=CYAN, width=2),
-            marker=dict(size=10, color=WARN, line=dict(color=PLOT_BG, width=2)),
-            text=[
-                f"p{int(p)}<br>{v:.2f}%"
-                for p, v in zip(
-                    df_thresh["Training percentile"],
-                    df_thresh["Future flagged percentage"],
-                )
-            ],
-            textposition="top center",
-            textfont=dict(color=FONT_CLR, size=10),
-        ))
-        fig_thr.add_vline(
-            x=THRESHOLD,
-            line_dash="dash",
-            line_color=WARN,
-            line_width=1.5,
-            annotation_text=f"Active ({THRESHOLD:.4f})",
-            annotation_font_color=WARN,
-        )
-        fig_thr.update_layout(
-            **base_layout(height=350),
-            xaxis_title="Threshold Value",
-            yaxis_title="% of Future Bookings Flagged",
-        )
-        st.plotly_chart(fig_thr, use_container_width=True, config={"displayModeBar": False})
-
-    # ── Row 2: Score by risk | Weekly flagged trend ──
-    # ── Row 3: Score by risk | Weekly flagged trend ──
-    col_c, col_d = st.columns(2)
-
-    with col_c:
-        st.markdown('<div class="section-header">Anomaly Score by Risk Level</div>', unsafe_allow_html=True)
-        cap99 = df["anomaly_score"].quantile(0.99)
-        df_bp = df[df["anomaly_score"] <= cap99].copy()
-        fig_box = px.box(
-            df_bp,
-            x="risk_level",
-            y="anomaly_score",
-            color="risk_level",
-            color_discrete_map={"Typical": TEAL, "Review": DANGER},
-            points="outliers",
-        )
-        fig_box.add_hline(
-            y=THRESHOLD, line_dash="dash", line_color=WARN,
-            annotation_text=f"Threshold {THRESHOLD:.3f}",
-            annotation_font_color=WARN,
-        )
-        fig_box.update_layout(
-            **base_layout(height=320, showlegend=False),
-            xaxis_title="Risk Level",
-            yaxis_title="Anomaly Score",
-        )
-        st.plotly_chart(fig_box, use_container_width=True, config={"displayModeBar": False})
-
-    with col_d:
-        st.markdown('<div class="section-header">Weekly Flagged Booking Trend</div>', unsafe_allow_html=True)
-        df_flagged = df[df["is_anomaly"] == 1].copy()
-        df_flagged["week"] = df_flagged["date_time"].dt.to_period("W").dt.start_time
-        weekly_flag = df_flagged.groupby("week").size().reset_index(name="flagged_count")
-        fig_trend = go.Figure()
-        fig_trend.add_trace(go.Scatter(
-            x=weekly_flag["week"],
-            y=weekly_flag["flagged_count"],
-            mode="lines+markers",
-            line=dict(color=DANGER, width=2),
-            fill="tozeroy",
-            fillcolor="rgba(255,79,114,0.12)",
-            marker=dict(size=6, color=DANGER),
-            name="Flagged / week",
-        ))
-        fig_trend.add_hline(
-            y=weekly_flag["flagged_count"].mean(),
-            line_dash="dot",
-            line_color=WARN,
-            annotation_text="Weekly avg",
-            annotation_font_color=WARN,
-        )
-        fig_trend.update_layout(
-            **base_layout(height=320, showlegend=False),
-            xaxis_title="Week",
-            yaxis_title="Flagged Bookings",
-        )
-        st.plotly_chart(fig_trend, use_container_width=True, config={"displayModeBar": False})
 
     # ── Row 3: Market cancellation rate vs anomaly score ──
     # Kept as the final analytical relationship chart. The low-value
@@ -1062,9 +985,6 @@ elif page == "📈 Analytics & Insights":
             "Chronological Cutoff",
             "Training Rows",
             "Future Test Rows",
-            "Threshold (95th pct)",
-            "Future Flagged Count",
-            "Future Flagged %",
         ],
         "Value": [
             f"{summary['source_travel_rows']:,}",
@@ -1073,9 +993,6 @@ elif page == "📈 Analytics & Insights":
             summary["chronological_cutoff"][:19],
             f"{summary['training_rows']:,}",
             f"{summary['future_test_rows']:,}",
-            f"{summary['threshold']:.6f}",
-            f"{summary['future_flagged_count']:,}",
-            f"{summary['future_flagged_percentage']:.2f}%",
         ],
     }
     df_sum = pd.DataFrame(s_data)
@@ -1110,10 +1027,7 @@ elif page == "🔬 Fraud Investigation":
     st.markdown("")
 
     # ── Load data ──────────────────────────────────────────────
-    df       = load_anomaly_results()
-    df_thr   = load_threshold_comparison()
-    df_usr   = load_flagged_user()
-    df_mkt   = load_flagged_market()
+    df = load_anomaly_results()
 
     flagged  = df[df["is_anomaly"] == 1].copy()
     normal   = df[df["is_anomaly"] == 0].copy()
@@ -1198,50 +1112,8 @@ elif page == "🔬 Fraud Investigation":
 
     st.markdown("")
 
-    # Side-by-side bar chart – normalised (z-score) so all features fit one scale
-    comp_features = [r["Feature"] for r in rows if r["Feature"] != "Anomaly Score (MSE)"]
-    normal_means  = [r["Normal (mean)"]  for r in rows if r["Feature"] != "Anomaly Score (MSE)"]
-    flagged_means = [r["Flagged (mean)"] for r in rows if r["Feature"] != "Anomaly Score (MSE)"]
-
-    # z-score relative to overall column std to make bars comparable
-    norm_means_arr  = np.array(normal_means,  dtype=float)
-    flag_means_arr  = np.array(flagged_means, dtype=float)
-
-    stds = []
-    feat_col_map = {r["Feature"]: spec[0] for r, spec in zip(rows, compare_specs)
-                    if r["Feature"] != "Anomaly Score (MSE)"}
-    for lbl in comp_features:
-        col_name = feat_col_map.get(lbl)
-        stds.append(df[col_name].std() if col_name and col_name in df.columns else 1.0)
-    stds_arr = np.where(np.array(stds) == 0, 1.0, stds)
-
-    z_normal  = (norm_means_arr  - norm_means_arr)  / stds_arr   # always 0 (baseline)
-    z_flagged = (flag_means_arr  - norm_means_arr)  / stds_arr
-
-    fig_comp = go.Figure()
-    fig_comp.add_trace(go.Bar(
-        name="Normal (baseline = 0)",
-        x=comp_features,
-        y=z_normal,
-        marker_color=TEAL,
-        opacity=0.80,
-    ))
-    fig_comp.add_trace(go.Bar(
-        name="Flagged (deviation from normal)",
-        x=comp_features,
-        y=z_flagged,
-        marker_color=DANGER,
-        opacity=0.85,
-    ))
-    fig_comp.add_hline(y=0, line_color=TEAL, line_dash="dot", line_width=1)
-    fig_comp.update_layout(
-        **base_layout(height=360, barmode="group"),
-        xaxis_title="Feature",
-        yaxis_title="Deviation from Normal Mean (std units)",
-        xaxis_tickangle=-30,
-        title=dict(text="Flagged vs Normal — Normalised Feature Deviation", font_color=FONT_CLR, font_size=13),
-    )
-    st.plotly_chart(fig_comp, use_container_width=True, config={"displayModeBar": False})
+    # The comparison table and key observations provide the feature-level comparison;
+    # a second chart of the same values is intentionally omitted to avoid duplication.
 
     # ══════════════════════════════════════════════════════════
     # SECTION 2 – Coordinated Booking Pattern Analysis (M4.2.2)
@@ -1414,31 +1286,7 @@ elif page == "🔬 Fraud Investigation":
         "Highest – strong anomaly signal",
     ]
 
-    fa1, fa2 = st.columns([2, 1])
-    with fa1:
-        st.markdown(
-            '<div style="font-size:0.9rem;color:#8ba0bb;margin-bottom:6px;">'
-            'Flagged Bookings by Anomaly Score Band</div>',
-            unsafe_allow_html=True,
-        )
-        st.dataframe(style_table(band_counts), use_container_width=True, hide_index=True)
-
-    with fa2:
-        fig_band = px.bar(
-            band_counts,
-            x="Flagged Bookings",
-            y="Score Band",
-            orientation="h",
-            color="Flagged Bookings",
-            color_continuous_scale=[[0, TEAL], [0.5, WARN], [1, DANGER]],
-        )
-        fig_band.update_layout(
-            **base_layout(height=290, showlegend=False, margin=dict(l=10, r=30, t=20, b=20)),
-            xaxis_title="Count",
-            yaxis_title="",
-            coloraxis_showscale=False,
-        )
-        st.plotly_chart(fig_band, use_container_width=True, config={"displayModeBar": False})
+    st.dataframe(style_table(band_counts), use_container_width=True, hide_index=True)
 
     # Flagged booking inspection table
     st.markdown(
@@ -1467,59 +1315,19 @@ elif page == "🔬 Fraud Investigation":
         height=360,
     )
 
-    # Scatter: anomaly score with threshold + near-threshold callout
-    st.markdown("")
-    df_scatter = flagged.copy()
-    df_scatter["Near Threshold"] = df_scatter["anomaly_score"].apply(
-        lambda x: f"Near Threshold ({THRESHOLD:.2f}–1.5)" if x <= 1.5 else "Higher Anomaly Score (>1.5)"
-    )
-    fig_fp = px.scatter(
-        df_scatter.sort_values("anomaly_score"),
-        x=range(len(df_scatter)),
-        y="anomaly_score",
-        color="Near Threshold",
-        color_discrete_map={
-            f"Near Threshold ({THRESHOLD:.2f}–1.5)": WARN,
-            "Higher Anomaly Score (≥1.5)": DANGER,
-        },
-        hover_data={"anomaly_score": True, "user_id": True, "hotel_market": True},
-        labels={"x": "Flagged Booking Index (sorted by score)", "anomaly_score": "Anomaly Score"},
-    )
-    fig_fp.add_hline(
-        y=THRESHOLD, line_dash="dash", line_color=TEAL, line_width=1.5,
-        annotation_text=f"Detection threshold ({THRESHOLD:.4f})",
-        annotation_font_color=TEAL,
-    )
-    fig_fp.update_layout(
-        **base_layout(height=300),
-        title=dict(
-            text=f"All {len(flagged)} Flagged Bookings — Score vs Threshold (near-threshold = review priority)",
-            font_color=FONT_CLR, font_size=12,
-        ),
-    )
-    st.plotly_chart(fig_fp, use_container_width=True, config={"displayModeBar": False})
+    # The score-band table above is retained as the focused manual-review summary.
+    # The all-flagged score scatter is omitted to avoid repeating the score distribution.
 
     # ══════════════════════════════════════════════════════════
     # SECTION 4 – Detection Metrics & Threshold Sensitivity (M4.1.1 / M4.1.3)
     # ══════════════════════════════════════════════════════════
     st.markdown(
-        '<div class="section-header">Detection Metrics & Threshold Sensitivity</div>',
+        '<div class="section-header">Comparison with Synthetic Labels</div>',
         unsafe_allow_html=True,
     )
 
-    # ── 4a: Detection counts ────────────────────────────────
-    st.markdown(
-        '<div style="font-size:0.9rem;color:#8ba0bb;margin-bottom:8px;">'
-        '<b style="color:#00c8b4">Detection Counts at Active Threshold (95th percentile)</b></div>',
-        unsafe_allow_html=True,
-    )
-    m1, m2, m3, m4 = st.columns(4)
-    with m1: kpi("Total Screened",   f"{len(df):,}",     "future test set")
-    with m2: kpi("Flagged",          f"{len(flagged):,}", f"{len(flagged)/len(df)*100:.2f}% of total", "danger")
-    with m3: kpi("Not Flagged",      f"{len(normal):,}",  f"{len(normal)/len(df)*100:.2f}% of total",  "ok")
-    with m4: kpi("Active Threshold", f"{THRESHOLD:.4f}",  "95th-pct training MSE", "warn")
-
-    st.markdown("")
+    # Overall screened/flagged counts and the active threshold are already shown on Overview.
+    # Keep this section focused on the synthetic-label comparison only.
 
     # ── 4b: Synthetic-label metrics (clearly caveated) ─────
     if HAS_SYNTH:
@@ -1569,56 +1377,4 @@ elif page == "🔬 Fraud Investigation":
         )
         st.markdown("")
 
-    # ── 4c: Threshold sensitivity (reused from Analytics page) ─
-    st.markdown(
-        '<div style="font-size:0.9rem;color:#8ba0bb;margin:12px 0 6px 0;">'
-        '<b style="color:#00c8b4">Threshold Sensitivity — Impact of Threshold Choice</b></div>',
-        unsafe_allow_html=True,
-    )
-    df_thr_disp = df_thr.copy()
-    df_thr_disp.columns = [c.strip() for c in df_thr_disp.columns]
-
-    thr_col  = "Threshold"
-    pct_col  = "Future flagged percentage"
-    flag_col = "Future flagged bookings"
-    pct_col2 = "Training percentile"
-
-    thr1, thr2 = st.columns([2, 1])
-    with thr1:
-        fig_thr2 = go.Figure()
-        fig_thr2.add_trace(go.Scatter(
-            x=df_thr_disp[thr_col],
-            y=df_thr_disp[pct_col],
-            mode="lines+markers+text",
-            line=dict(color=CYAN, width=2),
-            marker=dict(size=10, color=WARN, line=dict(color=PLOT_BG, width=2)),
-            text=[f"p{int(p)}: {v:.2f}%" for p, v in
-                  zip(df_thr_disp[pct_col2], df_thr_disp[pct_col])],
-            textposition="top center",
-            textfont=dict(color=FONT_CLR, size=10),
-        ))
-        fig_thr2.add_vline(
-            x=THRESHOLD, line_dash="dash", line_color=WARN, line_width=1.5,
-            annotation_text=f"Active ({THRESHOLD:.4f})",
-            annotation_font_color=WARN,
-        )
-        fig_thr2.update_layout(
-            **base_layout(height=300),
-            xaxis_title="Threshold Value",
-            yaxis_title="% of Bookings Flagged",
-        )
-        st.plotly_chart(fig_thr2, use_container_width=True, config={"displayModeBar": False})
-
-    with thr2:
-        thr_table = df_thr_disp[[pct_col2, thr_col, flag_col, pct_col]].copy()
-        thr_table.columns = ["Percentile", "Threshold", "Flagged", "% Flagged"]
-        thr_table["Threshold"] = thr_table["Threshold"].round(4)
-        thr_table["% Flagged"] = thr_table["% Flagged"].round(2)
-        st.dataframe(style_table(thr_table), use_container_width=True, hide_index=True)
-        st.markdown(
-            '<div style="font-size:0.76rem;color:#8ba0bb;margin-top:6px;">'
-            'Raising the threshold lowers the flag rate but increases the risk of missed anomalies.</div>',
-            unsafe_allow_html=True,
-        )
-
-   
+    # Threshold sensitivity is presented once on Analytics & Insights.
